@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BTC 단타 매매봇 배틀</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #071018;
+      --panel: #0f1a25;
+      --panel-2: #142434;
+      --text: #e8f0f7;
+      --muted: #89a2bb;
+      --line: #223447;
+      --accent: #f59e0b;
+      --good: #22c55e;
+      --bad: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 10% 5%, #17314a, var(--bg) 45%);
+      color: var(--text);
+      font-family: "Pretendard", "Noto Sans KR", sans-serif;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    .app {
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 330px 1fr;
+      gap: 12px;
+    }
+
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    h1 { margin: 0 0 10px; font-size: 1.05rem; line-height: 1.3; }
+    h2 { margin: 0 0 8px; font-size: 0.92rem; color: #d4e3f1; }
+
+    .muted {
+      color: var(--muted);
+      font-size: 0.81rem;
+      line-height: 1.45;
+      margin: 0 0 10px;
+    }
+
+    .list { display: grid; gap: 8px; }
+    .bot-list {
+      max-height: 320px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .stage-card {
+      cursor: pointer;
+      transition: border-color .15s ease;
+    }
+
+    .stage-card:hover { border-color: #335273; }
+    .stage-card.active { border-color: var(--accent); }
+
+    .title { font-weight: 700; font-size: 0.9rem; margin-bottom: 3px; }
+    .sub { color: var(--muted); font-size: 0.78rem; }
+
+    .btns {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button, select {
+      border: 1px solid #304a66;
+      background: #112030;
+      color: var(--text);
+      border-radius: 9px;
+      padding: 8px 11px;
+      cursor: pointer;
+      font-size: 0.84rem;
+    }
+
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin: 8px 0 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      background: #0d1824;
+      border-radius: 9px;
+      padding: 8px;
+    }
+
+    .metric .k { color: var(--muted); font-size: 0.75rem; margin-bottom: 3px; }
+    .metric .v { font-size: 0.88rem; font-weight: 700; }
+
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+
+    .chart-wrap {
+      height: 430px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0b1520;
+      padding: 8px;
+    }
+
+    .bottom {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 8px;
+    }
+
+    .stack {
+      display: grid;
+      grid-template-rows: 120px 1fr;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .log {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0b1520;
+      padding: 8px;
+      height: 230px;
+      overflow: auto;
+      font-size: 0.77rem;
+      line-height: 1.45;
+    }
+    .log.short { height: 120px; }
+
+    .status {
+      font-size: 0.83rem;
+      color: var(--muted);
+      min-height: 20px;
+      margin-top: 7px;
+    }
+
+    .leader-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 7px;
+      border-bottom: 1px solid rgba(137, 162, 187, 0.15);
+      padding: 3px 0;
+    }
+
+    .leader-row:last-child { border-bottom: 0; }
+
+    .state-head,
+    .state-row {
+      display: grid;
+      grid-template-columns: 1.1fr .55fr .55fr .55fr .55fr .55fr .9fr;
+      gap: 6px;
+      align-items: center;
+      font-size: 0.74rem;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(137, 162, 187, 0.14);
+    }
+    .state-head {
+      position: sticky;
+      top: 0;
+      background: #0b1520;
+      z-index: 2;
+      font-weight: 700;
+    }
+    .state-row:last-child { border-bottom: 0; }
+    .state-row.hot {
+      background: rgba(245, 158, 11, 0.09);
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 99px;
+      padding: 2px 7px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .tag.buy {
+      color: #0a2715;
+      background: #22c55e;
+    }
+    .tag.sell {
+      color: #2c0909;
+      background: #ef4444;
+    }
+    .tag.hold {
+      color: #d5e6f5;
+      background: #32485f;
+    }
+
+    @media (max-width: 1020px) {
+      .app { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .chart-wrap { height: 340px; }
+      .bottom { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <h1>BTC 단타 매매봇 배틀</h1>
+      <p class="muted">20개 봇이 동시에 같은 2주 스테이지에서 자동 매매합니다. 기본 시간은 10분이며 배속으로 단축할 수 있습니다.</p>
+
+      <h2>참전자 20봇</h2>
+      <div id="botList" class="list bot-list"></div>
+
+      <h2 style="margin-top:12px;">스테이지 5개</h2>
+      <div id="stageList" class="list"></div>
+
+      <div class="btns">
+        <label for="speed">배속</label>
+        <select id="speed">
+          <option value="1.5">1.5x</option>
+          <option value="2" selected>2x</option>
+          <option value="4">4x</option>
+          <option value="6">6x</option>
+        </select>
+      </div>
+
+      <div class="btns">
+        <button id="reloadStages">스테이지 재생성</button>
+        <button id="startBtn" disabled>배틀 시작</button>
+        <button id="pauseBtn" disabled>일시정지</button>
+      </div>
+
+      <div id="status" class="status">과거 BTC 데이터를 불러오는 중...</div>
+    </aside>
+
+    <main class="panel">
+      <div class="grid">
+        <div class="metric"><div class="k">초기 자본(봇당)</div><div class="v" id="mInitial">-</div></div>
+        <div class="metric"><div class="k">현재 선두 자본</div><div class="v" id="mEquity">-</div></div>
+        <div class="metric"><div class="k">선두 수익률</div><div class="v" id="mReturn">-</div></div>
+        <div class="metric"><div class="k">총 거래 횟수</div><div class="v" id="mTrades">-</div></div>
+        <div class="metric"><div class="k">진행률</div><div class="v" id="mProgress">-</div></div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+
+      <div class="bottom">
+        <div class="log" id="tradeLog"></div>
+        <div class="stack">
+          <div class="log short" id="summaryLog"></div>
+          <div class="log" id="botStateBoard"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = "https://api.coingecko.com/api/v3";
+    const GAME_DURATION_MS = 10 * 60 * 1000; // 2주=10분(1x 기준)
+    const INITIAL_CAPITAL = 10000;
+    const FEE_RATE = 0.001;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const STAGE_MS = 14 * DAY_MS;
+
+    const state = {
+      allDaily: [],
+      stages: [],
+      selectedStage: null,
+      stageSeries: [],
+      speed: 2,
+      chart: null,
+      running: false,
+      paused: false,
+      startWallTime: 0,
+      pauseStartedAt: 0,
+      pausedAccum: 0,
+      processedIndex: 0,
+      competitors: []
+    };
+
+    function makeDonchianTrend(entryPeriod, exitPeriod, portion, rsiFloor = 45) {
+      return function step(ctx) {
+        const en = donchian(ctx.closes, entryPeriod);
+        const ex = donchian(ctx.closes, exitPeriod);
+        const r = rsi(ctx.closes, 14);
+        if (!en || !ex || r == null) return null;
+        if (ctx.btc === 0 && ctx.price > en.high * 1.001 && r > rsiFloor) return { type: "buy", portion, reason: `${entryPeriod} 돌파` };
+        if (ctx.btc > 0 && (ctx.price < ex.low || r < 43)) return { type: "sell", portion: 1, reason: `${exitPeriod} 이탈` };
+        return null;
+      };
+    }
+
+    function makeEmaSwing(fast, slow, portion, rsiIn = 50, rsiOut = 45) {
+      return function step(ctx) {
+        const ef = ema(ctx.closes, fast);
+        const es = ema(ctx.closes, slow);
+        const r = rsi(ctx.closes, 14);
+        const bb = bollinger(ctx.closes, 20, 2);
+        if (ef == null || es == null || r == null || !bb) return null;
+        if (ctx.btc === 0 && ef > es && r > rsiIn && ctx.price < bb.upper * 0.998) return { type: "buy", portion, reason: `EMA${fast}/${slow} 정배열` };
+        if (ctx.btc > 0 && (ef < es || r < rsiOut || ctx.price > bb.upper * 1.01)) return { type: "sell", portion: 1, reason: "스윙 종료" };
+        return null;
+      };
+    }
+
+    function makeMeanReversion(rsiBuy, rsiSell, portion, bbMult = 2) {
+      return function step(ctx) {
+        const r = rsi(ctx.closes, 14);
+        const bb = bollinger(ctx.closes, 20, bbMult);
+        if (r == null || !bb) return null;
+        if (ctx.btc === 0 && (r < rsiBuy || ctx.price < bb.lower)) return { type: "buy", portion, reason: "과매도 반등" };
+        if (ctx.btc > 0 && (r > rsiSell || ctx.price > bb.mid)) return { type: "sell", portion: 1, reason: "평균 회귀" };
+        return null;
+      };
+    }
+
+    function makeVolBreak(lookback, rocEnter, portion) {
+      return function step(ctx) {
+        if (ctx.closes.length < lookback + 10) return null;
+        const e = ema(ctx.closes, 21);
+        const r = roc(ctx.closes, 5);
+        const range = ctx.closes.slice(-lookback, -1);
+        const high = Math.max(...range);
+        const low = Math.min(...range);
+        if (e == null || r == null) return null;
+        if (ctx.btc === 0 && ctx.price > high * 1.002 && ctx.price > e && r > rocEnter) return { type: "buy", portion, reason: "변동성 돌파" };
+        if (ctx.btc > 0 && (ctx.price < low * 0.998 || ctx.price < e)) return { type: "sell", portion: 1, reason: "돌파 실패" };
+        return null;
+      };
+    }
+
+    function makeRiskGuard(portion = 0.45) {
+      return function step(ctx) {
+        const e10 = ema(ctx.closes, 10);
+        const e50 = ema(ctx.closes, 50);
+        const r = rsi(ctx.closes, 14);
+        if (e10 == null || e50 == null || r == null) return null;
+        if (ctx.btc === 0 && ctx.price > e50 && ctx.price > e10 && r > 52 && r < 70) return { type: "buy", portion, reason: "리스크 제한 진입" };
+        if (ctx.btc > 0) {
+          const entry = ctx.meta.entryPrice || ctx.price;
+          const loss = (ctx.price - entry) / Math.max(1, entry);
+          if (loss < -0.02 || ctx.price < e10 || r < 45) return { type: "sell", portion: 1, reason: "손실 제한 청산" };
+        }
+        return null;
+      };
+    }
+
+    const bots = [
+      { id: "livermore", name: "리버모어 브레이커", desc: "돌파 추종", inspiration: "Jesse Livermore", step: makeDonchianTrend(20, 10, 0.55, 50) },
+      { id: "dennis", name: "데니스 터틀", desc: "터틀 채널", inspiration: "Richard Dennis", step: makeDonchianTrend(55, 20, 0.66, 47) },
+      { id: "soros", name: "소로스 리플렉시브", desc: "가속 모멘텀", inspiration: "George Soros", step: makeVolBreak(26, 0.7, 0.58) },
+      { id: "ptj", name: "튜더 리스크가드", desc: "손실 방어형", inspiration: "Paul Tudor Jones", step: makeRiskGuard(0.45) },
+      { id: "raschke", name: "라슈케 ADX", desc: "추세 눌림", inspiration: "Linda B. Raschke", step: makeEmaSwing(8, 21, 0.6, 49, 44) },
+      { id: "schwartz", name: "슈워츠 스윙", desc: "단기 스윙", inspiration: "Marty Schwartz", step: makeEmaSwing(10, 30, 0.56, 51, 46) },
+      { id: "seykota", name: "세이코타 트렌드", desc: "시스템 추세", inspiration: "Ed Seykota", step: makeDonchianTrend(35, 14, 0.62, 48) },
+      { id: "darvas", name: "다바스 박스", desc: "박스 상단 돌파", inspiration: "Nicolas Darvas", step: makeVolBreak(20, 0.45, 0.57) },
+      { id: "oneil", name: "오닐 모멘텀", desc: "강세 모멘텀", inspiration: "William O'Neil", step: makeEmaSwing(12, 26, 0.61, 54, 47) },
+      { id: "drucken", name: "드러켄밀러 매크로", desc: "추세 확대", inspiration: "Stanley Druckenmiller", step: makeVolBreak(30, 0.8, 0.63) },
+      { id: "minervini", name: "미네르비니 VCP", desc: "수축 후 확장", inspiration: "Mark Minervini", step: makeVolBreak(24, 0.55, 0.52) },
+      { id: "williams_l", name: "래리 윌리엄스", desc: "단기 반전", inspiration: "Larry Williams", step: makeMeanReversion(32, 60, 0.58, 2.1) },
+      { id: "williams_b", name: "빌 윌리엄스", desc: "혼돈형 추세", inspiration: "Bill Williams", step: makeEmaSwing(5, 34, 0.54, 50, 42) },
+      { id: "elder", name: "엘더 트리플", desc: "추세+오실레이터", inspiration: "Alexander Elder", step: makeEmaSwing(13, 34, 0.5, 53, 47) },
+      { id: "sperandeo", name: "스페란데오", desc: "추세전환 포착", inspiration: "Victor Sperandeo", step: makeDonchianTrend(18, 9, 0.53, 49) },
+      { id: "henry", name: "존 W. 헨리", desc: "CTA 추세형", inspiration: "John W. Henry", step: makeDonchianTrend(40, 15, 0.64, 46) },
+      { id: "kovner", name: "코브너 밸런스", desc: "공격-방어 균형", inspiration: "Bruce Kovner", step: makeEmaSwing(9, 26, 0.52, 52, 45) },
+      { id: "marcus", name: "마커스 모멘텀", desc: "초기 추세 포착", inspiration: "Michael Marcus", step: makeVolBreak(18, 0.5, 0.59) },
+      { id: "basso", name: "바소 리스크엔진", desc: "손실 최소화", inspiration: "Tom Basso", step: makeRiskGuard(0.42) },
+      { id: "unger", name: "운거 시스템", desc: "규칙 기반 단타", inspiration: "Andrea Unger", step: makeMeanReversion(29, 57, 0.55, 1.9) }
+    ];
+
+    const el = {
+      botList: document.getElementById("botList"),
+      stageList: document.getElementById("stageList"),
+      speed: document.getElementById("speed"),
+      reloadStages: document.getElementById("reloadStages"),
+      startBtn: document.getElementById("startBtn"),
+      pauseBtn: document.getElementById("pauseBtn"),
+      status: document.getElementById("status"),
+      mInitial: document.getElementById("mInitial"),
+      mEquity: document.getElementById("mEquity"),
+      mReturn: document.getElementById("mReturn"),
+      mTrades: document.getElementById("mTrades"),
+      mProgress: document.getElementById("mProgress"),
+      tradeLog: document.getElementById("tradeLog"),
+      summaryLog: document.getElementById("summaryLog"),
+      botStateBoard: document.getElementById("botStateBoard")
+    };
+
+    const money = (n) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+    const pct = (n) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+    const toKDate = (ts) => new Date(ts).toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" });
+
+    function clamp(v, lo, hi) {
+      return Math.min(hi, Math.max(lo, v));
+    }
+
+    function mulberry32(seed) {
+      let t = seed >>> 0;
+      return function rand() {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function normalizePricePoints(points) {
+      if (!Array.isArray(points)) return [];
+      return points
+        .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+        .map(([ts, price]) => {
+          const tsNum = Number(ts);
+          const fixedTs = tsNum < 1e12 ? tsNum * 1000 : tsNum;
+          return [fixedTs, Number(price)];
+        })
+        .sort((a, b) => a[0] - b[0]);
+    }
+
+    async function fetchJsonWithTimeout(url, timeoutMs = 12000) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function createSyntheticDailyHistory() {
+      const now = Date.now();
+      const start = now - 365 * 4 * DAY_MS;
+      const points = [];
+      let price = 19000;
+      for (let ts = start; ts <= now; ts += DAY_MS) {
+        const t = (ts - start) / DAY_MS;
+        const trend = 0.00045;
+        const cycle = Math.sin(t / 46) * 0.012 + Math.sin(t / 130) * 0.018;
+        const shock = (Math.random() - 0.5) * 0.035;
+        price = Math.max(2000, price * (1 + trend + cycle + shock));
+        points.push([ts, price]);
+      }
+      return points;
+    }
+
+    async function fetchDailyYears() {
+      const end = Date.now();
+      const start = end - 365 * 4 * DAY_MS;
+      const rangeUrl = `${API_BASE}/coins/bitcoin/market_chart/range?vs_currency=usd&from=${Math.floor(start / 1000)}&to=${Math.floor(end / 1000)}`;
+      const maxUrl = `${API_BASE}/coins/bitcoin/market_chart?vs_currency=usd&days=max&interval=daily`;
+
+      for (const url of [rangeUrl, maxUrl]) {
+        try {
+          const json = await fetchJsonWithTimeout(url);
+          const normalized = normalizePricePoints(json.prices).filter((p) => p[0] >= start && p[0] <= end);
+          if (normalized.length >= 120) return normalized;
+        } catch (_) {
+          // next source
+        }
+      }
+      return createSyntheticDailyHistory();
+    }
+
+    function mean(arr) {
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+
+    function stdev(arr) {
+      const m = mean(arr);
+      return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / arr.length);
+    }
+
+    function ema(arr, period) {
+      if (arr.length < period) return null;
+      const k = 2 / (period + 1);
+      let v = mean(arr.slice(0, period));
+      for (let i = period; i < arr.length; i++) v = arr[i] * k + v * (1 - k);
+      return v;
+    }
+
+    function rsi(arr, period) {
+      if (arr.length <= period) return null;
+      let gain = 0;
+      let loss = 0;
+      for (let i = arr.length - period; i < arr.length; i++) {
+        const d = arr[i] - arr[i - 1];
+        if (d >= 0) gain += d;
+        else loss -= d;
+      }
+      if (loss === 0) return 100;
+      const rs = gain / loss;
+      return 100 - 100 / (1 + rs);
+    }
+
+    function bollinger(arr, period, mult) {
+      if (arr.length < period) return null;
+      const s = arr.slice(-period);
+      const m = mean(s);
+      const sd = stdev(s);
+      return { mid: m, upper: m + sd * mult, lower: m - sd * mult };
+    }
+
+    function donchian(arr, period) {
+      if (arr.length < period + 1) return null;
+      const s = arr.slice(-period - 1, -1);
+      return { high: Math.max(...s), low: Math.min(...s) };
+    }
+
+    function roc(arr, period) {
+      if (arr.length <= period) return null;
+      const prev = arr[arr.length - 1 - period];
+      const now = arr[arr.length - 1];
+      return ((now - prev) / prev) * 100;
+    }
+
+    function adxLike(arr, period = 14) {
+      if (arr.length < period + 3) return null;
+      let plus = 0;
+      let minus = 0;
+      let tr = 0;
+      for (let i = arr.length - period; i < arr.length; i++) {
+        const d = arr[i] - arr[i - 1];
+        plus += Math.max(0, d);
+        minus += Math.max(0, -d);
+        tr += Math.abs(d);
+      }
+      if (tr === 0) return 0;
+      const diPlus = (plus / tr) * 100;
+      const diMinus = (minus / tr) * 100;
+      return (Math.abs(diPlus - diMinus) / Math.max(1e-9, diPlus + diMinus)) * 100;
+    }
+
+    function findNearestPrice(daily, ts, fallback) {
+      if (!daily.length) return fallback;
+      let best = daily[0];
+      let minDiff = Math.abs(daily[0][0] - ts);
+      for (let i = 1; i < daily.length; i++) {
+        const d = Math.abs(daily[i][0] - ts);
+        if (d < minDiff) {
+          minDiff = d;
+          best = daily[i];
+        }
+      }
+      return best[1] || fallback;
+    }
+
+    function buildStageSeriesFromDaily(stage, daily) {
+      const start = stage.start;
+      const end = stage.end;
+      const inRange = daily.filter((p) => p[0] >= start - DAY_MS && p[0] <= end + DAY_MS);
+      const baseStart = findNearestPrice(inRange, start, daily[daily.length - 1]?.[1] || 30000);
+      const baseEnd = findNearestPrice(inRange, end, baseStart);
+      const dayCount = Math.max(1, Math.round((end - start) / DAY_MS));
+      const dailyRet = Math.abs((baseEnd - baseStart) / Math.max(1, baseStart)) / dayCount;
+      const noiseAmp = clamp(dailyRet * 2.2, 0.002, 0.02);
+      const stepMs = 15 * 60 * 1000;
+      const seed = Math.floor((stage.start + stage.end) / 1000);
+      const rand = mulberry32(seed);
+      const series = [];
+
+      for (let ts = start; ts <= end; ts += stepMs) {
+        const progress = (ts - start) / Math.max(1, end - start);
+        const anchor = baseStart + (baseEnd - baseStart) * progress;
+        const wave = 1 + Math.sin(progress * Math.PI * 10) * noiseAmp + Math.sin(progress * Math.PI * 36) * noiseAmp * 0.5;
+        const jitter = 1 + (rand() - 0.5) * noiseAmp * 1.4;
+        const close = Math.max(1000, anchor * wave * jitter);
+        series.push({ ts, close });
+      }
+      return series;
+    }
+
+    function windowFeatures(slice) {
+      const prices = slice.map((d) => d[1]);
+      const first = prices[0];
+      const last = prices[prices.length - 1];
+      const ret = (last - first) / first;
+      const vol = stdev(prices) / mean(prices);
+
+      let maxDrop = 0;
+      let peak = prices[0];
+      for (const p of prices) {
+        peak = Math.max(peak, p);
+        maxDrop = Math.min(maxDrop, (p - peak) / peak);
+      }
+
+      const mid = Math.floor(prices.length * 0.6);
+      const firstPart = prices.slice(0, mid);
+      const secondPart = prices.slice(mid);
+      const firstRange = (Math.max(...firstPart) - Math.min(...firstPart)) / mean(firstPart);
+      const secondMove = Math.abs((secondPart[secondPart.length - 1] - secondPart[0]) / secondPart[0]);
+
+      return { ret, vol, maxDrop, firstRange, secondMove };
+    }
+
+    function chooseUnique(bucket, picked, minGapMs) {
+      return bucket.find((c) => picked.every((p) => Math.abs(p.start - c.start) > minGapMs));
+    }
+
+    function pickStages(prices) {
+      if (!Array.isArray(prices) || prices.length < 20) return [];
+      const stepMs = 2 * DAY_MS;
+      const candidates = [];
+      const firstTs = prices[0]?.[0];
+      const lastTs = prices[prices.length - 1]?.[0];
+      if (!Number.isFinite(firstTs) || !Number.isFinite(lastTs) || firstTs >= lastTs) return [];
+
+      for (let t = firstTs; t + STAGE_MS <= lastTs; t += stepMs) {
+        const slice = prices.filter((x) => x[0] >= t && x[0] < t + STAGE_MS);
+        if (slice.length < 12) continue;
+        const feat = windowFeatures(slice);
+        candidates.push({ start: t, end: t + STAGE_MS, feat, label: "", score: 0 });
+      }
+
+      const up = candidates.map((c) => ({ ...c, label: "상승 추세", score: c.feat.ret * 2 + c.feat.vol })).sort((a, b) => b.score - a.score);
+      const down = candidates.map((c) => ({ ...c, label: "하락 추세", score: -c.feat.ret * 2 + c.feat.vol })).sort((a, b) => b.score - a.score);
+      const rebound = candidates.map((c) => ({ ...c, label: "급락 후 반등", score: Math.abs(c.feat.maxDrop) * 1.5 + Math.max(0, c.feat.ret) })).sort((a, b) => b.score - a.score);
+      const breakout = candidates.map((c) => ({ ...c, label: "박스 돌파", score: c.feat.secondMove - c.feat.firstRange })).sort((a, b) => b.score - a.score);
+      const chaos = candidates.map((c) => ({ ...c, label: "고변동 혼조", score: c.feat.vol + Math.abs(c.feat.maxDrop) })).sort((a, b) => b.score - a.score);
+
+      const picked = [];
+      const minGap = 16 * DAY_MS;
+      for (const bucket of [up, down, rebound, breakout, chaos]) {
+        const found = chooseUnique(bucket, picked, minGap);
+        if (found) picked.push(found);
+      }
+
+      const fallbackByMove = candidates
+        .map((c) => ({ ...c, label: "변동 구간", score: Math.abs(c.feat.ret) + c.feat.vol }))
+        .sort((a, b) => b.score - a.score);
+
+      for (const c of fallbackByMove) {
+        if (picked.length >= 5) break;
+        if (picked.every((p) => Math.abs(p.start - c.start) > minGap)) picked.push(c);
+      }
+
+      const selected = picked.slice(0, 5).map((x, i) => ({
+        id: `stage_${i + 1}`,
+        type: x.label,
+        start: x.start,
+        end: x.end,
+        summary: `${toKDate(x.start)} ~ ${toKDate(x.end)}`
+      }));
+
+      if (selected.length === 5) return selected;
+
+      const force = [...selected];
+      const span = lastTs - firstTs;
+      for (let i = force.length; i < 5; i++) {
+        const anchor = firstTs + (span * i) / 5;
+        const end = Math.min(anchor + STAGE_MS, lastTs);
+        const start = Math.max(firstTs, end - STAGE_MS);
+        force.push({
+          id: `stage_fallback_${i + 1}`,
+          type: `기본 스테이지 ${String.fromCharCode(65 + i)}`,
+          start,
+          end,
+          summary: `${toKDate(start)} ~ ${toKDate(end)}`
+        });
+      }
+      return force.slice(0, 5);
+    }
+
+    function renderBots() {
+      el.botList.innerHTML = "";
+      for (const b of bots) {
+        const node = document.createElement("div");
+        node.className = "card";
+        node.innerHTML = `<div class="title">${b.name}</div><div class="sub">${b.desc} · ${b.inspiration} 스타일</div>`;
+        el.botList.appendChild(node);
+      }
+    }
+
+    function renderStages() {
+      el.stageList.innerHTML = "";
+      for (const s of state.stages) {
+        const node = document.createElement("div");
+        node.className = `card stage-card ${state.selectedStage?.id === s.id ? "active" : ""}`;
+        node.innerHTML = `<div class="title">${s.type}</div><div class="sub">${s.summary}</div>`;
+        node.onclick = () => {
+          state.selectedStage = s;
+          renderStages();
+          updateStartButton();
+        };
+        el.stageList.appendChild(node);
+      }
+    }
+
+    function updateStartButton() {
+      el.startBtn.disabled = !state.selectedStage || state.running;
+    }
+
+    function initChart() {
+      const ctx = document.getElementById("chart");
+      if (state.chart) state.chart.destroy();
+      state.chart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "BTC/USD",
+              data: [],
+              borderColor: "#f59e0b",
+              pointRadius: 0,
+              borderWidth: 2,
+              tension: 0.12
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { labels: { color: "#89a2bb" } } },
+          scales: {
+            x: { ticks: { color: "#89a2bb", maxTicksLimit: 10 }, grid: { color: "rgba(137,162,187,.15)" } },
+            y: { ticks: { color: "#89a2bb", callback: (v) => `$${Number(v).toLocaleString("en-US")}` }, grid: { color: "rgba(137,162,187,.15)" } }
+          }
+        }
+      });
+    }
+
+    function initCompetitors() {
+      state.competitors = bots.map((b) => ({
+        id: b.id,
+        name: b.name,
+        desc: b.desc,
+        inspiration: b.inspiration,
+        step: b.step,
+        cash: INITIAL_CAPITAL,
+        btc: 0,
+        trades: [],
+        peak: INITIAL_CAPITAL,
+        meta: { entryPrice: 0 },
+        lastAction: "HOLD",
+        lastActionReason: "대기",
+        lastActionTick: -999
+      }));
+    }
+
+    function appendTradeLog(msg) {
+      const div = document.createElement("div");
+      div.textContent = msg;
+      el.tradeLog.prepend(div);
+      while (el.tradeLog.children.length > 120) el.tradeLog.removeChild(el.tradeLog.lastChild);
+    }
+
+    function equityOf(bot, price) {
+      return bot.cash + bot.btc * price;
+    }
+
+    function placeOrder(bot, action, price, ts, tickIdx) {
+      if (!action) return;
+      const timeLabel = new Date(ts).toLocaleString("ko-KR");
+
+      if (action.type === "buy") {
+        const usd = bot.cash * action.portion;
+        if (usd < 10) return;
+        const fee = usd * FEE_RATE;
+        const qty = (usd - fee) / price;
+        bot.cash -= usd;
+        bot.btc += qty;
+        bot.meta.entryPrice = bot.meta.entryPrice > 0 ? (bot.meta.entryPrice + price) / 2 : price;
+        bot.trades.push({ side: "BUY", price, qty, ts, reason: action.reason });
+        bot.lastAction = "BUY";
+        bot.lastActionReason = action.reason;
+        bot.lastActionTick = tickIdx;
+        appendTradeLog(`[${timeLabel}] ${bot.name} BUY ${qty.toFixed(5)} @ ${money(price)} | ${action.reason}`);
+      }
+
+      if (action.type === "sell") {
+        const qty = bot.btc * action.portion;
+        if (qty * price < 10) return;
+        const gross = qty * price;
+        const fee = gross * FEE_RATE;
+        bot.cash += gross - fee;
+        bot.btc -= qty;
+        if (bot.btc < 1e-8) {
+          bot.btc = 0;
+          bot.meta.entryPrice = 0;
+        }
+        bot.trades.push({ side: "SELL", price, qty, ts, reason: action.reason });
+        bot.lastAction = "SELL";
+        bot.lastActionReason = action.reason;
+        bot.lastActionTick = tickIdx;
+        appendTradeLog(`[${timeLabel}] ${bot.name} SELL ${qty.toFixed(5)} @ ${money(price)} | ${action.reason}`);
+      }
+    }
+
+    function actionTag(action) {
+      if (action === "BUY") return `<span class="tag buy">BUY</span>`;
+      if (action === "SELL") return `<span class="tag sell">SELL</span>`;
+      return `<span class="tag hold">HOLD</span>`;
+    }
+
+    function getLeaderboard(price) {
+      return state.competitors
+        .map((b) => {
+          const equity = equityOf(b, price);
+          const ret = ((equity - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100;
+          const mdd = ((b.peak - equity) / Math.max(1, b.peak)) * 100;
+          return {
+            id: b.id,
+            name: b.name,
+            inspiration: b.inspiration,
+            equity,
+            ret,
+            trades: b.trades.length,
+            mdd
+          };
+        })
+        .sort((a, b) => b.ret - a.ret);
+    }
+
+    function renderLeaderboard(price, final = false) {
+      const lb = getLeaderboard(price);
+      let html = `<div><b>${final ? "최종 순위" : "실시간 순위"}</b></div>`;
+      if (final && lb[0]) {
+        html += `<div style="margin:4px 0 8px;" class="good">승자: ${lb[0].name} (${pct(lb[0].ret)})</div>`;
+      }
+      const limit = final ? lb.length : 7;
+      for (let i = 0; i < Math.min(limit, lb.length); i++) {
+        const row = lb[i];
+        html += `<div class="leader-row">
+          <div>${i + 1}. ${row.name}</div>
+          <div class="${row.ret >= 0 ? "good" : "bad"}">${pct(row.ret)}</div>
+          <div>${money(row.equity)}</div>
+        </div>`;
+      }
+      if (!final && lb.length > limit) {
+        html += `<div class="sub" style="margin-top:4px;">...총 ${lb.length}봇 경쟁 중</div>`;
+      }
+      el.summaryLog.innerHTML = html;
+      return lb;
+    }
+
+    function renderBotStateBoard(price, tickIdx) {
+      const sorted = getLeaderboard(price);
+      let html = `<div class="state-head"><div>봇</div><div>수익률</div><div>자본</div><div>현금</div><div>BTC</div><div>거래</div><div>최근 액션</div></div>`;
+      for (const row of sorted) {
+        const bot = state.competitors.find((x) => x.id === row.id) || {
+          cash: 0,
+          btc: 0,
+          lastAction: "HOLD",
+          lastActionReason: "대기",
+          lastActionTick: -999
+        };
+        const hot = bot && tickIdx - bot.lastActionTick <= 4;
+        html += `<div class="state-row ${hot ? "hot" : ""}">
+          <div>${row.name}</div>
+          <div class="${row.ret >= 0 ? "good" : "bad"}">${pct(row.ret)}</div>
+          <div>${money(row.equity)}</div>
+          <div>${money(bot.cash)}</div>
+          <div>${bot.btc.toFixed(4)}</div>
+          <div>${row.trades}</div>
+          <div>${actionTag(bot.lastAction)} <span class="sub">${bot.lastActionReason}</span></div>
+        </div>`;
+      }
+      el.botStateBoard.innerHTML = html;
+    }
+
+    function updateMetrics(idx) {
+      const current = state.stageSeries[idx];
+      const price = current.close;
+
+      for (const b of state.competitors) {
+        const eq = equityOf(b, price);
+        b.peak = Math.max(b.peak, eq);
+      }
+
+      const lb = renderLeaderboard(price, false);
+      renderBotStateBoard(price, idx);
+      const leader = lb[0];
+      const totalTrades = lb.reduce((s, b) => s + b.trades, 0);
+      const progress = ((idx + 1) / state.stageSeries.length) * 100;
+
+      el.mInitial.textContent = money(INITIAL_CAPITAL);
+      el.mEquity.textContent = leader ? money(leader.equity) : "-";
+      el.mReturn.textContent = leader ? pct(leader.ret) : "-";
+      el.mReturn.className = `v ${leader && leader.ret >= 0 ? "good" : "bad"}`;
+      el.mTrades.textContent = String(totalTrades);
+      el.mProgress.textContent = `${progress.toFixed(1)}%`;
+
+      const labels = state.stageSeries.slice(0, idx + 1).map((d) => new Date(d.ts).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" }));
+      const line = state.stageSeries.slice(0, idx + 1).map((d) => d.close);
+      state.chart.data.labels = labels;
+      state.chart.data.datasets[0].data = line;
+      state.chart.update("none");
+    }
+
+    function finishGame() {
+      state.running = false;
+      state.paused = false;
+      el.pauseBtn.disabled = true;
+      el.pauseBtn.textContent = "일시정지";
+      updateStartButton();
+
+      const lastPrice = state.stageSeries[state.stageSeries.length - 1].close;
+      const lb = renderLeaderboard(lastPrice, true);
+      const winner = lb[0];
+      if (winner) {
+        el.status.textContent = `게임 종료. 승자: ${winner.name} (${pct(winner.ret)})`;
+      } else {
+        el.status.textContent = "게임 종료";
+      }
+    }
+
+    function runLoop() {
+      if (!state.running || state.paused) return;
+
+      const elapsed = Date.now() - state.startWallTime - state.pausedAccum;
+      const effectiveDuration = GAME_DURATION_MS / state.speed;
+      const stepMs = effectiveDuration / Math.max(1, state.stageSeries.length - 1);
+      const targetIdx = Math.min(state.stageSeries.length - 1, Math.floor(elapsed / stepMs));
+
+      while (state.processedIndex < targetIdx) {
+        state.processedIndex++;
+        const idx = state.processedIndex;
+        const closes = state.stageSeries.slice(0, idx + 1).map((d) => d.close);
+        const price = closes[closes.length - 1];
+        const ts = state.stageSeries[idx].ts;
+
+        for (const bot of state.competitors) {
+          const action = bot.step({
+            closes,
+            price,
+            cash: bot.cash,
+            btc: bot.btc,
+            meta: bot.meta
+          });
+          placeOrder(bot, action, price, ts, idx);
+        }
+
+        updateMetrics(idx);
+      }
+
+      if (state.processedIndex >= state.stageSeries.length - 1) {
+        finishGame();
+        return;
+      }
+
+      requestAnimationFrame(runLoop);
+    }
+
+    async function startGame() {
+      if (!state.selectedStage) return;
+
+      el.startBtn.disabled = true;
+      el.pauseBtn.disabled = false;
+      el.pauseBtn.textContent = "일시정지";
+      el.tradeLog.innerHTML = "";
+      el.summaryLog.innerHTML = "";
+      el.status.textContent = "스테이지 데이터를 준비 중...";
+
+      try {
+        state.stageSeries = buildStageSeriesFromDaily(state.selectedStage, state.allDaily);
+        if (state.stageSeries.length < 80) throw new Error("스테이지 시계열 생성 실패");
+
+        initCompetitors();
+        state.running = true;
+        state.paused = false;
+        state.startWallTime = Date.now();
+        state.pauseStartedAt = 0;
+        state.pausedAccum = 0;
+        state.processedIndex = 0;
+
+        initChart();
+        updateMetrics(0);
+        el.status.textContent = `진행 중: ${state.selectedStage.type} · ${state.speed}x (2주=${(10 / state.speed).toFixed(2)}분)`;
+        requestAnimationFrame(runLoop);
+      } catch (e) {
+        el.status.textContent = e.message || "게임 시작 실패";
+        state.running = false;
+        el.pauseBtn.disabled = true;
+        updateStartButton();
+      }
+    }
+
+    function togglePause() {
+      if (!state.running) return;
+      if (!state.paused) {
+        state.paused = true;
+        state.pauseStartedAt = Date.now();
+        el.pauseBtn.textContent = "재개";
+        el.status.textContent = "일시정지";
+      } else {
+        state.paused = false;
+        state.pausedAccum += Date.now() - state.pauseStartedAt;
+        el.pauseBtn.textContent = "일시정지";
+        el.status.textContent = `진행 중 (${state.speed}x)`;
+        requestAnimationFrame(runLoop);
+      }
+    }
+
+    async function regenerateStages() {
+      try {
+        el.status.textContent = "스테이지를 분석 중...";
+        state.stages = pickStages(state.allDaily);
+        if (state.stages.length < 5) throw new Error("스테이지 생성 실패");
+        state.selectedStage = state.stages[0];
+        renderStages();
+        updateStartButton();
+        el.status.textContent = `스테이지 5개 생성 완료 (데이터 ${state.allDaily.length}개)`;
+      } catch (_) {
+        const first = state.allDaily[0]?.[0];
+        const last = state.allDaily[state.allDaily.length - 1]?.[0];
+        if (Number.isFinite(first) && Number.isFinite(last) && last - first > STAGE_MS * 2) {
+          const span = last - first;
+          state.stages = [0, 1, 2, 3, 4].map((i) => {
+            const start = first + (span * i) / 5;
+            const end = Math.min(start + STAGE_MS, last);
+            return {
+              id: `stage_rescue_${i + 1}`,
+              type: `복구 스테이지 ${i + 1}`,
+              start: Math.max(first, end - STAGE_MS),
+              end,
+              summary: `${toKDate(Math.max(first, end - STAGE_MS))} ~ ${toKDate(end)}`
+            };
+          });
+          state.selectedStage = state.stages[0];
+          renderStages();
+          updateStartButton();
+          el.status.textContent = "복구 스테이지 5개를 생성했습니다.";
+          return;
+        }
+        el.status.textContent = "스테이지 생성 실패: 데이터가 완전히 비어 있습니다.";
+      }
+    }
+
+    async function boot() {
+      renderBots();
+      initChart();
+
+      try {
+        state.allDaily = await fetchDailyYears();
+        if (state.allDaily.length < 120) throw new Error("과거 데이터가 충분하지 않습니다.");
+        await regenerateStages();
+      } catch (e) {
+        el.status.textContent = e.message || "초기화 실패";
+      }
+    }
+
+    el.reloadStages.onclick = regenerateStages;
+    el.startBtn.onclick = startGame;
+    el.pauseBtn.onclick = togglePause;
+    el.speed.onchange = () => {
+      state.speed = Number(el.speed.value) || 2;
+      if (!state.running) {
+        el.status.textContent = `배속 ${state.speed}x 선택됨`;
+      }
+    };
+
+    boot();
+  </script>
+</body>
+</html>
