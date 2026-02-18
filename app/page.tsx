@@ -54,6 +54,30 @@ type Snapshot = {
 };
 
 const SPEEDS = [1.5, 2, 4, 6];
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+function formatTickBySpan(ts: number, spanMs: number): string {
+  const d = new Date(ts);
+  if (spanMs <= 2 * HOUR_MS) {
+    return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  }
+  if (spanMs <= 8 * DAY_MS) {
+    return d.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+  }
+  if (spanMs <= 120 * DAY_MS) {
+    return d.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+  }
+  return d.toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" });
+}
+
+function formatTooltipTitle(ts: number, spanMs: number): string {
+  const d = new Date(ts);
+  if (spanMs <= 2 * HOUR_MS) {
+    return d.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
 
 function emaSeries(values: number[], period: number): Array<number | null> {
   if (values.length === 0) return [];
@@ -92,6 +116,8 @@ export default function Page() {
   const pollingRef = useRef<number | null>(null);
   const chartRef = useRef<ChartType<"line"> | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const xTimestampsRef = useRef<number[]>([]);
+  const xSpanRef = useRef<number>(0);
 
   async function fetchSnapshot(): Promise<Snapshot | null> {
     try {
@@ -191,13 +217,28 @@ export default function Page() {
             legend: { labels: { color: "#89a2bb", boxWidth: 12 } },
             tooltip: {
               callbacks: {
+                title: (items) => {
+                  const idx = items[0]?.dataIndex ?? 0;
+                  const ts = xTimestampsRef.current[idx];
+                  if (!ts) return "";
+                  return formatTooltipTitle(ts, xSpanRef.current);
+                },
                 label: (ctx) => `${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString("en-US", { maximumFractionDigits: 2 })}`
               }
             }
           },
           scales: {
             x: {
-              ticks: { color: "#89a2bb", maxTicksLimit: 8 },
+              ticks: {
+                color: "#89a2bb",
+                autoSkip: true,
+                maxRotation: 0,
+                callback: (_v, index) => {
+                  const ts = xTimestampsRef.current[index];
+                  if (!ts) return "";
+                  return formatTickBySpan(ts, xSpanRef.current);
+                }
+              },
               grid: { color: "rgba(137,162,187,.15)" }
             },
             y: {
@@ -231,13 +272,22 @@ export default function Page() {
     const closes = pts.map((p) => p.close);
     const ema20 = emaSeries(closes, 20);
     const ema50 = emaSeries(closes, 50);
+    const tsList = pts.map((p) => p.ts);
+    const spanMs = tsList.length > 1 ? tsList[tsList.length - 1] - tsList[0] : 0;
+    xTimestampsRef.current = tsList;
+    xSpanRef.current = spanMs;
 
-    c.data.labels = pts.map((p) =>
-      new Date(p.ts).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-    );
+    c.data.labels = tsList.map((ts) => String(ts));
     c.data.datasets[0].data = closes;
     c.data.datasets[1].data = ema20;
     c.data.datasets[2].data = ema50;
+    const ticks = c.options.scales?.x?.ticks;
+    if (ticks) {
+      if (spanMs <= 2 * HOUR_MS) ticks.maxTicksLimit = 10;
+      else if (spanMs <= 8 * DAY_MS) ticks.maxTicksLimit = 9;
+      else if (spanMs <= 120 * DAY_MS) ticks.maxTicksLimit = 7;
+      else ticks.maxTicksLimit = 6;
+    }
     c.update("none");
   }, [snapshot?.chartSeries]);
 

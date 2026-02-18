@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fetchDailyYears } from "@/lib/engine/data";
+import { fetchDailyYears, isReasonableBTCSeries } from "@/lib/engine/data";
 import { buildStageSeriesFromDaily, pickStages } from "@/lib/engine/stage";
 import { bots } from "@/lib/engine/strategies";
 import { buildRunResult, getLeaderboard, initCompetitors, processTick, INITIAL_CAPITAL } from "@/lib/engine/simulator";
@@ -208,7 +208,8 @@ async function ensureData() {
   const firstTs = runtime.daily[0]?.[0] || 0;
   const hasLongHistory = firstTs > 0 && firstTs <= new Date("2014-01-01T00:00:00Z").getTime();
   const hasHistoryStages = runtime.stages.length === 10 && runtime.stages.every((s) => Boolean(s.title) && Boolean(s.turningPoint));
-  if (runtime.initialized && hasLongHistory && hasHistoryStages) return;
+  const hasReasonablePrices = isReasonableBTCSeries(runtime.daily);
+  if (runtime.initialized && hasLongHistory && hasHistoryStages && hasReasonablePrices) return;
 
   runtime.daily = await fetchDailyYears();
   runtime.stages = pickStages(runtime.daily);

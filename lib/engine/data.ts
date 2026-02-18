@@ -36,6 +36,51 @@ export function seeded(seed: number): () => number {
   };
 }
 
+export function isReasonableBTCSeries(points: Array<[number, number]>): boolean {
+  if (!points.length) return false;
+  const prices = points.map((p) => p[1]).filter((v) => Number.isFinite(v) && v > 0);
+  if (!prices.length) return false;
+  const max = Math.max(...prices);
+  const min = Math.min(...prices);
+  // 2013~2026 구간에서 비트코인 일봉 데이터로 허용할 현실적 범위
+  return min >= 1 && max <= 250000;
+}
+
+function createAnchoredHistory(seed = 42): Array<[number, number]> {
+  const rand = seeded(seed);
+  const anchors: Array<[number, number]> = ([
+    [new Date("2013-01-01T00:00:00Z").getTime(), 13] as [number, number],
+    [new Date("2013-12-01T00:00:00Z").getTime(), 1100] as [number, number],
+    [new Date("2015-01-14T00:00:00Z").getTime(), 200] as [number, number],
+    [new Date("2017-12-17T00:00:00Z").getTime(), 19500] as [number, number],
+    [new Date("2018-12-15T00:00:00Z").getTime(), 3200] as [number, number],
+    [new Date("2020-03-13T00:00:00Z").getTime(), 4000] as [number, number],
+    [new Date("2021-04-14T00:00:00Z").getTime(), 64000] as [number, number],
+    [new Date("2021-11-10T00:00:00Z").getTime(), 69000] as [number, number],
+    [new Date("2022-11-10T00:00:00Z").getTime(), 16000] as [number, number],
+    [new Date("2024-03-14T00:00:00Z").getTime(), 73000] as [number, number],
+    [new Date("2025-12-31T00:00:00Z").getTime(), 98000] as [number, number]
+  ] as Array<[number, number]>).sort((a, b) => a[0] - b[0]);
+
+  const now = Date.now();
+  const start = anchors[0][0];
+  const end = Math.max(now, anchors[anchors.length - 1][0]);
+  const points: Array<[number, number]> = [];
+
+  let seg = 0;
+  for (let ts = start; ts <= end; ts += DAY_MS) {
+    while (seg < anchors.length - 2 && anchors[seg + 1][0] < ts) seg++;
+    const left = anchors[seg];
+    const right = anchors[Math.min(anchors.length - 1, seg + 1)];
+    const ratio = left[0] === right[0] ? 0 : (ts - left[0]) / (right[0] - left[0]);
+    const base = left[1] + (right[1] - left[1]) * clamp(ratio, 0, 1);
+    const noise = 1 + (rand() - 0.5) * 0.08;
+    points.push([ts, Math.max(1, base * noise)]);
+  }
+
+  return points;
+}
+
 export function createSyntheticDailyHistory(seed = 42): Array<[number, number]> {
   const rand = seeded(seed);
   const now = Date.now();
@@ -51,6 +96,9 @@ export function createSyntheticDailyHistory(seed = 42): Array<[number, number]> 
     price = Math.max(2000, price * (1 + trend + cycle + shock));
     points.push([ts, price]);
   }
+  if (!isReasonableBTCSeries(points)) {
+    return createAnchoredHistory(seed);
+  }
   return points;
 }
 
@@ -64,13 +112,13 @@ export async function fetchDailyYears(): Promise<Array<[number, number]>> {
     try {
       const json = await fetchJsonWithTimeout(url);
       const normalized = normalizePricePoints(json.prices).filter((p) => p[0] >= start && p[0] <= end);
-      if (normalized.length >= 120) return normalized;
+      if (normalized.length >= 120 && isReasonableBTCSeries(normalized)) return normalized;
     } catch {
       // fallback next source
     }
   }
 
-  return createSyntheticDailyHistory();
+  return createAnchoredHistory();
 }
 
 export function findNearestPrice(daily: Array<[number, number]>, ts: number, fallback: number): number {
