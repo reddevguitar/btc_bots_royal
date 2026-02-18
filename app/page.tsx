@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Chart as ChartType } from "chart.js";
 
 type Stage = {
   id: string;
@@ -54,6 +55,20 @@ type Snapshot = {
 
 const SPEEDS = [1.5, 2, 4, 6];
 
+function emaSeries(values: number[], period: number): Array<number | null> {
+  if (values.length === 0) return [];
+  const out: Array<number | null> = new Array(values.length).fill(null);
+  if (values.length < period) return out;
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[period - 1] = ema;
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    out[i] = ema;
+  }
+  return out;
+}
+
 function money(n: number): string {
   return `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
@@ -75,6 +90,8 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
 
   const pollingRef = useRef<number | null>(null);
+  const chartRef = useRef<ChartType<"line"> | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   async function fetchSnapshot(): Promise<Snapshot | null> {
     try {
@@ -124,9 +141,121 @@ export default function Page() {
     };
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+
+    const setup = async () => {
+      if (!canvasRef.current) return;
+      const { default: Chart } = await import("chart.js/auto");
+      if (disposed) return;
+
+      chartRef.current = new Chart(canvasRef.current, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "BTC Price",
+              data: [],
+              borderColor: "#f59e0b",
+              backgroundColor: "rgba(245, 158, 11, 0.12)",
+              fill: true,
+              pointRadius: 0,
+              borderWidth: 2,
+              tension: 0.12
+            },
+            {
+              label: "EMA 20",
+              data: [],
+              borderColor: "#22c55e",
+              pointRadius: 0,
+              borderWidth: 1.4,
+              tension: 0.1
+            },
+            {
+              label: "EMA 50",
+              data: [],
+              borderColor: "#60a5fa",
+              pointRadius: 0,
+              borderWidth: 1.4,
+              tension: 0.1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { labels: { color: "#89a2bb", boxWidth: 12 } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: "#89a2bb", maxTicksLimit: 8 },
+              grid: { color: "rgba(137,162,187,.15)" }
+            },
+            y: {
+              ticks: {
+                color: "#89a2bb",
+                callback: (v) => `$${Number(v).toLocaleString("en-US")}`
+              },
+              grid: { color: "rgba(137,162,187,.15)" }
+            }
+          }
+        }
+      });
+    };
+
+    void setup();
+
+    return () => {
+      disposed = true;
+      if (chartRef.current) {
+        chartRef.current.destroy();
+        chartRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const c = chartRef.current;
+    const pts = snapshot?.chartSeries || [];
+    if (!c || pts.length === 0) return;
+
+    const closes = pts.map((p) => p.close);
+    const ema20 = emaSeries(closes, 20);
+    const ema50 = emaSeries(closes, 50);
+
+    c.data.labels = pts.map((p) =>
+      new Date(p.ts).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    );
+    c.data.datasets[0].data = closes;
+    c.data.datasets[1].data = ema20;
+    c.data.datasets[2].data = ema50;
+    c.update("none");
+  }, [snapshot?.chartSeries]);
+
   const leader = snapshot?.leaderboard?.[0];
   const totalTrades = snapshot?.leaderboard?.reduce((s, b) => s + b.trades, 0) ?? 0;
   const selectedStageType = snapshot?.stages.find((s) => s.id === snapshot?.selectedStageId)?.title || "-";
+  const chartPoints = snapshot?.chartSeries || [];
+  const lastPrice = chartPoints.length ? chartPoints[chartPoints.length - 1].close : 0;
+  const prevPrice = chartPoints.length > 1 ? chartPoints[chartPoints.length - 2].close : lastPrice;
+  const trendNow = lastPrice > prevPrice ? "상승" : lastPrice < prevPrice ? "하락" : "횡보";
+  const ema20Last = (() => {
+    const e = emaSeries(chartPoints.map((p) => p.close), 20);
+    return e[e.length - 1] || null;
+  })();
+  const ema50Last = (() => {
+    const e = emaSeries(chartPoints.map((p) => p.close), 50);
+    return e[e.length - 1] || null;
+  })();
   const sortedBotStates = useMemo(() => {
     if (!snapshot) return [];
     return snapshot.botStates.slice().sort((a, b) => b.ret - a.ret);
@@ -214,23 +343,15 @@ export default function Page() {
           <div className="metric"><div className="k">스테이지</div><div className="v">{selectedStageType}</div></div>
         </div>
 
-        <div className="chart-wrap" style={{ height: 260 }}>
-          <svg width="100%" height="100%" viewBox="0 0 1000 260" preserveAspectRatio="none">
-            {(() => {
-              const pts = snapshot?.chartSeries || [];
-              if (pts.length < 2) return null;
-              const min = Math.min(...pts.map((p) => p.close));
-              const max = Math.max(...pts.map((p) => p.close));
-              const path = pts
-                .map((p, i) => {
-                  const x = (i / (pts.length - 1)) * 1000;
-                  const y = 240 - ((p.close - min) / Math.max(1e-9, max - min)) * 220;
-                  return `${i === 0 ? "M" : "L"}${x},${y}`;
-                })
-                .join(" ");
-              return <path d={path} fill="none" stroke="#f59e0b" strokeWidth="2" />;
-            })()}
-          </svg>
+        <div className="grid" style={{ marginTop: 0 }}>
+          <div className="metric"><div className="k">현재가</div><div className="v">{lastPrice ? money(lastPrice) : "-"}</div></div>
+          <div className="metric"><div className="k">EMA20</div><div className="v">{ema20Last ? money(ema20Last) : "-"}</div></div>
+          <div className="metric"><div className="k">EMA50</div><div className="v">{ema50Last ? money(ema50Last) : "-"}</div></div>
+          <div className="metric"><div className="k">단기 추세</div><div className={`v ${trendNow === "상승" ? "good" : trendNow === "하락" ? "bad" : ""}`}>{trendNow}</div></div>
+        </div>
+
+        <div className="chart-wrap" style={{ height: 320 }}>
+          <canvas ref={canvasRef} />
         </div>
 
         <div className="bottom">
