@@ -1,14 +1,53 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Chart from "chart.js/auto";
-import { fetchDailyYears } from "@/lib/engine/data";
-import { bots } from "@/lib/engine/strategies";
-import { buildStageSeriesFromDaily, pickStages } from "@/lib/engine/stage";
-import { buildRunResult, getLeaderboard, initCompetitors, processTick, INITIAL_CAPITAL } from "@/lib/engine/simulator";
-import type { Competitor, LeaderRow, Stage, StagePoint, TickOrder } from "@/lib/engine/types";
 
-const GAME_DURATION_MS = 10 * 60 * 1000;
+type Stage = {
+  id: string;
+  type: string;
+  start: number;
+  end: number;
+  summary: string;
+};
+
+type LeaderRow = {
+  id: string;
+  name: string;
+  equity: number;
+  ret: number;
+  trades: number;
+};
+
+type BotState = {
+  id: string;
+  name: string;
+  cash: number;
+  btc: number;
+  lastAction: "BUY" | "SELL" | "HOLD";
+  lastActionReason: string;
+  lastActionTick: number;
+  ret: number;
+  equity: number;
+  trades: number;
+};
+
+type Snapshot = {
+  status: "idle" | "running" | "paused" | "finished";
+  message: string;
+  speed: number;
+  stages: Stage[];
+  selectedStageId: string;
+  botsCatalog: Array<{ id: string; name: string; desc: string; inspiration: string }>;
+  progress: number;
+  processedIndex: number;
+  initialCapital: number;
+  leaderboard: LeaderRow[];
+  botStates: BotState[];
+  tradeLogs: string[];
+  chartSeries: Array<{ ts: number; close: number }>;
+  runResult: Record<string, unknown> | null;
+};
+
 const SPEEDS = [1.5, 2, 4, 6];
 
 function money(n: number): string {
@@ -26,224 +65,97 @@ function actionClass(action: string): string {
 }
 
 export default function Page() {
-  const [daily, setDaily] = useState<Array<[number, number]>>([]);
-  const [stages, setStages] = useState<Stage[]>([]);
-  const [selectedStageId, setSelectedStageId] = useState<string>("");
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [stageId, setStageId] = useState<string>("");
   const [speed, setSpeed] = useState<number>(2);
-  const [status, setStatus] = useState<string>("데이터 로딩 중...");
+  const [busy, setBusy] = useState(false);
 
-  const [running, setRunning] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [series, setSeries] = useState<StagePoint[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderRow[]>([]);
-  const [botStates, setBotStates] = useState<Competitor[]>([]);
-  const [tradeLogs, setTradeLogs] = useState<string[]>([]);
-  const [progress, setProgress] = useState(0);
-  const [resultJson, setResultJson] = useState<string>("");
+  const pollingRef = useRef<number | null>(null);
 
-  const chartCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const chartRef = useRef<Chart | null>(null);
-  const rafRef = useRef<number | null>(null);
+  async function fetchSnapshot() {
+    const res = await fetch("/api/runtime", { cache: "no-store" });
+    const data = (await res.json()) as Snapshot;
+    setSnapshot(data);
+    setStageId((prev) => prev || data.selectedStageId);
+    setSpeed((prev) => prev || data.speed);
+  }
 
-  const competitorsRef = useRef<Competitor[]>([]);
-  const simRef = useRef({
-    startWallTime: 0,
-    pauseStartedAt: 0,
-    pausedAccum: 0,
-    processedIndex: 0
-  });
-
-  const selectedStage = useMemo(() => stages.find((s) => s.id === selectedStageId) ?? null, [stages, selectedStageId]);
+  async function sendAction(action: string, payload?: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/runtime", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...payload })
+      });
+      const data = (await res.json()) as Snapshot;
+      setSnapshot(data);
+      setStageId(data.selectedStageId);
+      setSpeed(data.speed);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
-    if (!chartCanvasRef.current) return;
-    chartRef.current = new Chart(chartCanvasRef.current, {
-      type: "line",
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label: "BTC/USD",
-            data: [],
-            borderColor: "#f59e0b",
-            pointRadius: 0,
-            borderWidth: 2,
-            tension: 0.12
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: { legend: { labels: { color: "#89a2bb" } } },
-        scales: {
-          x: { ticks: { color: "#89a2bb", maxTicksLimit: 10 }, grid: { color: "rgba(137,162,187,.15)" } },
-          y: {
-            ticks: { color: "#89a2bb", callback: (v) => `$${Number(v).toLocaleString("en-US")}` },
-            grid: { color: "rgba(137,162,187,.15)" }
-          }
-        }
-      }
-    });
+    void fetchSnapshot();
+    pollingRef.current = window.setInterval(() => {
+      void fetchSnapshot();
+    }, 1200);
 
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      chartRef.current?.destroy();
-      chartRef.current = null;
+      if (pollingRef.current) window.clearInterval(pollingRef.current);
     };
   }, []);
 
-  useEffect(() => {
-    const boot = async () => {
-      const loaded = await fetchDailyYears();
-      setDaily(loaded);
-      const nextStages = pickStages(loaded);
-      setStages(nextStages);
-      setSelectedStageId(nextStages[0]?.id ?? "");
-      setStatus(`준비 완료. 스테이지 ${nextStages.length}개 / 봇 ${bots.length}개`);
-    };
-
-    void boot();
-  }, []);
-
-  const refreshStages = () => {
-    if (!daily.length) return;
-    const nextStages = pickStages(daily);
-    setStages(nextStages);
-    setSelectedStageId(nextStages[0]?.id ?? "");
-    setStatus(`스테이지 갱신 완료. ${nextStages.length}개`);
-  };
-
-  const updateChart = (idx: number, nextSeries: StagePoint[]) => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    chart.data.labels = nextSeries.slice(0, idx + 1).map((d) =>
-      new Date(d.ts).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })
-    );
-    chart.data.datasets[0].data = nextSeries.slice(0, idx + 1).map((d) => d.close);
-    chart.update("none");
-  };
-
-  const appendOrderLogs = (orders: TickOrder[]) => {
-    if (!orders.length) return;
-    const logs = orders.map((o) => {
-      const at = new Date(o.ts).toLocaleString("ko-KR");
-      return `[${at}] ${o.botName} ${o.side} ${o.qty.toFixed(5)} @ ${money(o.price)} | ${o.reason}`;
-    });
-    setTradeLogs((prev) => [...logs.reverse(), ...prev].slice(0, 150));
-  };
-
-  const finalizeRun = (lb: LeaderRow[]) => {
-    setRunning(false);
-    setPaused(false);
-    const winner = lb[0];
-    if (winner) setStatus(`종료. 승자: ${winner.name} (${pct(winner.ret)})`);
-
-    const result = buildRunResult(
-      `run_${Date.now()}`,
-      selectedStage?.id ?? "stage_unknown",
-      speed,
-      lb
-    );
-    setResultJson(JSON.stringify(result, null, 2));
-  };
-
-  const frame = () => {
-    if (!running || paused || !series.length) return;
-
-    const elapsed = Date.now() - simRef.current.startWallTime - simRef.current.pausedAccum;
-    const effectiveDuration = GAME_DURATION_MS / speed;
-    const stepMs = effectiveDuration / Math.max(1, series.length - 1);
-    const targetIdx = Math.min(series.length - 1, Math.floor(elapsed / stepMs));
-
-    while (simRef.current.processedIndex < targetIdx) {
-      simRef.current.processedIndex += 1;
-      const idx = simRef.current.processedIndex;
-
-      const { orders, leaderboard: lb } = processTick(competitorsRef.current, series, idx);
-      appendOrderLogs(orders);
-      setLeaderboard(lb);
-      setBotStates([...competitorsRef.current]);
-      setProgress(((idx + 1) / series.length) * 100);
-      updateChart(idx, series);
-    }
-
-    if (simRef.current.processedIndex >= series.length - 1) {
-      const finalLB = getLeaderboard(competitorsRef.current, series[series.length - 1].close);
-      setLeaderboard(finalLB);
-      finalizeRun(finalLB);
-      return;
-    }
-
-    rafRef.current = requestAnimationFrame(frame);
-  };
-
-  useEffect(() => {
-    if (running && !paused) rafRef.current = requestAnimationFrame(frame);
-    return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, paused, speed, series]);
-
-  const startRun = () => {
-    if (!selectedStage || !daily.length) return;
-
-    const stageSeries = buildStageSeriesFromDaily(selectedStage, daily, 1);
-    setSeries(stageSeries);
-    setResultJson("");
-    setTradeLogs([]);
-
-    competitorsRef.current = initCompetitors(bots);
-    setBotStates([...competitorsRef.current]);
-
-    const initLB = getLeaderboard(competitorsRef.current, stageSeries[0].close);
-    setLeaderboard(initLB);
-    setProgress(0);
-    updateChart(0, stageSeries);
-
-    simRef.current = {
-      startWallTime: Date.now(),
-      pauseStartedAt: 0,
-      pausedAccum: 0,
-      processedIndex: 0
-    };
-
-    setRunning(true);
-    setPaused(false);
-    setStatus(`진행 중: ${selectedStage.type} / ${speed}x`);
-  };
-
-  const togglePause = () => {
-    if (!running) return;
-    if (!paused) {
-      simRef.current.pauseStartedAt = Date.now();
-      setPaused(true);
-      setStatus("일시정지");
-      return;
-    }
-
-    simRef.current.pausedAccum += Date.now() - simRef.current.pauseStartedAt;
-    setPaused(false);
-    setStatus(`진행 중 / ${speed}x`);
-  };
-
-  const leader = leaderboard[0];
-  const totalTrades = leaderboard.reduce((s, b) => s + b.trades, 0);
+  const leader = snapshot?.leaderboard?.[0];
+  const totalTrades = snapshot?.leaderboard?.reduce((s, b) => s + b.trades, 0) ?? 0;
+  const selectedStageType = snapshot?.stages.find((s) => s.id === snapshot?.selectedStageId)?.type || "-";
+  const sortedBotStates = useMemo(() => {
+    if (!snapshot) return [];
+    return snapshot.botStates.slice().sort((a, b) => b.ret - a.ret);
+  }, [snapshot]);
 
   return (
     <div className="app">
       <aside className="panel">
-        <h1>BTC 단타 매매봇 배틀</h1>
-        <p className="muted">1단계 구조 분리 버전. 20개 봇을 플러그인 전략으로 분리했고, 결과를 JSON으로 출력합니다.</p>
+        <h1>BTC Bot Control Center</h1>
+        <p className="muted">서버에서 시뮬레이션이 계속 실행됩니다. 브라우저를 꺼도 서버 프로세스가 살아있으면 계속 진행됩니다.</p>
 
-        <h2>참전자 {bots.length}봇</h2>
+        <h2>Control Panel</h2>
+        <div className="btns">
+          <button disabled={busy || snapshot?.status === "running"} onClick={() => sendAction("start", { stageId, speed })}>실행</button>
+          <button disabled={busy || snapshot?.status !== "running"} onClick={() => sendAction("pause")}>일시정지</button>
+          <button disabled={busy || snapshot?.status !== "paused"} onClick={() => sendAction("resume")}>재개</button>
+          <button disabled={busy} onClick={() => sendAction("stop")}>종료</button>
+          <button disabled={busy} onClick={() => sendAction("reset")}>리셋</button>
+        </div>
+
+        <h2 style={{ marginTop: 12 }}>Options</h2>
+        <div className="btns">
+          <label htmlFor="stage">스테이지</label>
+          <select id="stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
+            {(snapshot?.stages || []).map((s) => (
+              <option key={s.id} value={s.id}>{s.type}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="btns">
+          <label htmlFor="speed">배속</label>
+          <select id="speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
+            {SPEEDS.map((v) => <option key={v} value={v}>{v}x</option>)}
+          </select>
+        </div>
+
+        <div className="btns">
+          <button disabled={busy} onClick={() => sendAction("options", { stageId, speed })}>옵션 적용</button>
+          <button disabled={busy} onClick={() => sendAction("regenerate")}>스테이지 재생성</button>
+        </div>
+
+        <h2 style={{ marginTop: 12 }}>Bots ({snapshot?.botsCatalog.length || 0})</h2>
         <div className="list bot-list">
-          {bots.map((b) => (
+          {(snapshot?.botsCatalog || []).map((b) => (
             <div key={b.id} className="card">
               <div className="title">{b.name}</div>
               <div className="sub">{b.desc} · {b.inspiration}</div>
@@ -251,60 +163,52 @@ export default function Page() {
           ))}
         </div>
 
-        <h2 style={{ marginTop: 12 }}>스테이지 5개</h2>
-        <div className="list">
-          {stages.map((s) => (
-            <div
-              key={s.id}
-              className={`card stage-card ${selectedStageId === s.id ? "active" : ""}`}
-              onClick={() => setSelectedStageId(s.id)}
-            >
-              <div className="title">{s.type}</div>
-              <div className="sub">{s.summary}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="btns">
-          <label htmlFor="speed">배속</label>
-          <select id="speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-            {SPEEDS.map((v) => (
-              <option key={v} value={v}>{v}x</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="btns">
-          <button onClick={refreshStages}>스테이지 재생성</button>
-          <button onClick={startRun} disabled={!selectedStageId || running}>배틀 시작</button>
-          <button onClick={togglePause} disabled={!running}>{paused ? "재개" : "일시정지"}</button>
-        </div>
-
-        <div className="status">{status}</div>
+        <div className="status">{snapshot?.message || "초기화 중..."}</div>
       </aside>
 
       <main className="panel">
         <div className="grid">
-          <div className="metric"><div className="k">초기 자본(봇당)</div><div className="v">{money(INITIAL_CAPITAL)}</div></div>
+          <div className="metric"><div className="k">상태</div><div className="v">{snapshot?.status || "-"}</div></div>
+          <div className="metric"><div className="k">초기 자본(봇당)</div><div className="v">{money(snapshot?.initialCapital || 10000)}</div></div>
           <div className="metric"><div className="k">현재 선두 자본</div><div className="v">{leader ? money(leader.equity) : "-"}</div></div>
           <div className="metric"><div className="k">선두 수익률</div><div className={`v ${leader && leader.ret >= 0 ? "good" : "bad"}`}>{leader ? pct(leader.ret) : "-"}</div></div>
           <div className="metric"><div className="k">총 거래 횟수</div><div className="v">{totalTrades}</div></div>
-          <div className="metric"><div className="k">진행률</div><div className="v">{progress.toFixed(1)}%</div></div>
         </div>
 
-        <div className="chart-wrap">
-          <canvas ref={chartCanvasRef} />
+        <div className="grid" style={{ marginTop: 0 }}>
+          <div className="metric"><div className="k">진행률</div><div className="v">{(snapshot?.progress || 0).toFixed(1)}%</div></div>
+          <div className="metric"><div className="k">배속</div><div className="v">{snapshot?.speed || speed}x</div></div>
+          <div className="metric"><div className="k">스테이지</div><div className="v">{selectedStageType}</div></div>
+        </div>
+
+        <div className="chart-wrap" style={{ height: 260 }}>
+          <svg width="100%" height="100%" viewBox="0 0 1000 260" preserveAspectRatio="none">
+            {(() => {
+              const pts = snapshot?.chartSeries || [];
+              if (pts.length < 2) return null;
+              const min = Math.min(...pts.map((p) => p.close));
+              const max = Math.max(...pts.map((p) => p.close));
+              const path = pts
+                .map((p, i) => {
+                  const x = (i / (pts.length - 1)) * 1000;
+                  const y = 240 - ((p.close - min) / Math.max(1e-9, max - min)) * 220;
+                  return `${i === 0 ? "M" : "L"}${x},${y}`;
+                })
+                .join(" ");
+              return <path d={path} fill="none" stroke="#f59e0b" strokeWidth="2" />;
+            })()}
+          </svg>
         </div>
 
         <div className="bottom">
           <div className="log">
-            {tradeLogs.map((line, idx) => (<div key={`${line}-${idx}`}>{line}</div>))}
+            {(snapshot?.tradeLogs || []).map((line, idx) => (<div key={`${idx}-${line}`}>{line}</div>))}
           </div>
 
           <div className="stack">
             <div className="log short">
               <div><b>실시간 순위</b></div>
-              {leaderboard.slice(0, 7).map((row, i) => (
+              {(snapshot?.leaderboard || []).slice(0, 10).map((row, i) => (
                 <div key={row.id} className="leader-row">
                   <div>{i + 1}. {row.name}</div>
                   <div className={row.ret >= 0 ? "good" : "bad"}>{pct(row.ret)}</div>
@@ -317,38 +221,28 @@ export default function Page() {
               <div className="state-head">
                 <div>봇</div><div>수익률</div><div>자본</div><div>현금</div><div>BTC</div><div>거래</div><div>최근 액션</div>
               </div>
-              {botStates
-                .slice()
-                .sort((a, b) => {
-                  const aa = leaderboard.find((l) => l.id === a.id)?.ret ?? -999;
-                  const bb = leaderboard.find((l) => l.id === b.id)?.ret ?? -999;
-                  return bb - aa;
-                })
-                .map((b) => {
-                  const row = leaderboard.find((r) => r.id === b.id);
-                  const hot = simRef.current.processedIndex - b.lastActionTick <= 4;
-                  return (
-                    <div key={b.id} className={`state-row ${hot ? "hot" : ""}`}>
-                      <div>{b.name}</div>
-                      <div className={row && row.ret >= 0 ? "good" : "bad"}>{row ? pct(row.ret) : "-"}</div>
-                      <div>{row ? money(row.equity) : "-"}</div>
-                      <div>{money(b.cash)}</div>
-                      <div>{b.btc.toFixed(4)}</div>
-                      <div>{row?.trades ?? 0}</div>
-                      <div>
-                        <span className={`tag ${actionClass(b.lastAction)}`}>{b.lastAction}</span> <span className="sub">{b.lastActionReason}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+              {sortedBotStates.map((b) => {
+                const hot = (snapshot?.processedIndex || 0) - b.lastActionTick <= 4;
+                return (
+                  <div key={b.id} className={`state-row ${hot ? "hot" : ""}`}>
+                    <div>{b.name}</div>
+                    <div className={b.ret >= 0 ? "good" : "bad"}>{pct(b.ret)}</div>
+                    <div>{money(b.equity)}</div>
+                    <div>{money(b.cash)}</div>
+                    <div>{b.btc.toFixed(4)}</div>
+                    <div>{b.trades}</div>
+                    <div><span className={`tag ${actionClass(b.lastAction)}`}>{b.lastAction}</span> <span className="sub">{b.lastActionReason}</span></div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {resultJson && (
+        {snapshot?.runResult && (
           <>
             <h2 style={{ marginTop: 12 }}>Run Result JSON</h2>
-            <pre className="log" style={{ height: 220 }}>{resultJson}</pre>
+            <pre className="log" style={{ height: 220 }}>{JSON.stringify(snapshot.runResult, null, 2)}</pre>
           </>
         )}
       </main>

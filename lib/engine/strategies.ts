@@ -124,5 +124,15 @@ export const bots: BotDefinition[] = [
   { id: "kovner", name: "코브너 밸런스", desc: "공격-방어 균형", inspiration: "Bruce Kovner", step: makeEmaSwing(9, 26, 0.52, 52, 45) },
   { id: "marcus", name: "마커스 모멘텀", desc: "초기 추세 포착", inspiration: "Michael Marcus", step: makeVolBreak(18, 0.5, 0.59) },
   { id: "basso", name: "바소 리스크엔진", desc: "손실 최소화", inspiration: "Tom Basso", step: makeRiskGuard(0.42) },
-  { id: "unger", name: "운거 시스템", desc: "규칙 기반 단타", inspiration: "Andrea Unger", step: makeMeanReversion(29, 57, 0.55, 1.9) }
+  { id: "unger", name: "운거 시스템", desc: "규칙 기반 단타", inspiration: "Andrea Unger", step: makeMeanReversion(29, 57, 0.55, 1.9) },
+  { id: "simons", name: "사이먼스 퀀트", desc: "단기 퀀트 스윙", inspiration: "Jim Simons", step: makeEmaSwing(6, 18, 0.5, 51, 44) },
+  { id: "dalio", name: "달리오 매크로", desc: "중기 추세 필터", inspiration: "Ray Dalio", step: makeDonchianTrend(28, 12, 0.5, 47) },
+  { id: "lynch", name: "린치 모멘텀", desc: "강세 추종", inspiration: "Peter Lynch", step: makeVolBreak(22, 0.52, 0.57) },
+  { id: "tepper", name: "테퍼 리스크온", desc: "반등 추세형", inspiration: "David Tepper", step: makeMeanReversion(34, 62, 0.53, 2.2) },
+  { id: "cohen", name: "코헨 템포", desc: "빠른 템포 매매", inspiration: "Steve Cohen", step: makeEmaSwing(4, 16, 0.49, 52, 46) },
+  { id: "icahn", name: "아이칸 리버설", desc: "되돌림 포착", inspiration: "Carl Icahn", step: makeMeanReversion(31, 58, 0.5, 2.0) },
+  { id: "ackman", name: "애크먼 컨빅션", desc: "선택적 진입", inspiration: "Bill Ackman", step: makeRiskGuard(0.4) },
+  { id: "paulrotter", name: "폴 로터 스캘프", desc: "초단타 돌파", inspiration: "Paul Rotter", step: makeVolBreak(14, 0.45, 0.46) },
+  { id: "linda2", name: "라슈케 스윙2", desc: "추세 전환형", inspiration: "Linda B. Raschke", step: makeEmaSwing(7, 24, 0.55, 50, 45) },
+  { id: "drucken2", name: "드러켄밀러2", desc: "가속 추세 확장", inspiration: "Stanley Druckenmiller", step: makeDonchianTrend(30, 11, 0.6, 49) }
 ];

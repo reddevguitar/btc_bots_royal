@@ -4,9 +4,10 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function normalizePricePoints(points: unknown): Array<[number, number]> {
   if (!Array.isArray(points)) return [];
-  return points
+  const src = points as unknown[];
+  return src
     .filter((p): p is [number, number] => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
-    .map(([ts, price]) => {
+    .map(([ts, price]): [number, number] => {
       const fixedTs = ts < 1e12 ? ts * 1000 : ts;
       return [fixedTs, price];
     })
