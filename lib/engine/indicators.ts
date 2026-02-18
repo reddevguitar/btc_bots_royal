@@ -57,3 +57,29 @@ export function roc(arr: number[], period: number): number | null {
   const now = arr[arr.length - 1];
   return ((now - prev) / prev) * 100;
 }
+
+export function zScore(arr: number[], period: number): number | null {
+  if (arr.length < period) return null;
+  const s = arr.slice(-period);
+  const m = mean(s);
+  const sd = stdev(s);
+  if (sd === 0) return 0;
+  return (arr[arr.length - 1] - m) / sd;
+}
+
+export function adxLike(arr: number[], period = 14): number | null {
+  if (arr.length < period + 3) return null;
+  let plus = 0;
+  let minus = 0;
+  let tr = 0;
+  for (let i = arr.length - period; i < arr.length; i++) {
+    const d = arr[i] - arr[i - 1];
+    plus += Math.max(0, d);
+    minus += Math.max(0, -d);
+    tr += Math.abs(d);
+  }
+  if (tr === 0) return 0;
+  const diPlus = (plus / tr) * 100;
+  const diMinus = (minus / tr) * 100;
+  return (Math.abs(diPlus - diMinus) / Math.max(1e-9, diPlus + diMinus)) * 100;
+}

@@ -13,6 +13,7 @@ export type BotContext = {
   btc: number;
   meta: {
     entryPrice: number;
+    [key: string]: number;
   };
 };
 
@@ -44,6 +45,7 @@ export type Competitor = {
   peak: number;
   meta: {
     entryPrice: number;
+    [key: string]: number;
   };
   lastAction: "BUY" | "SELL" | "HOLD";
   lastActionReason: string;
@@ -52,7 +54,11 @@ export type Competitor = {
 
 export type Stage = {
   id: string;
-  type: string;
+  type: string; // legacy label
+  title: string; // 상징 이름
+  period: string; // 시간
+  turningPoint: string; // 중요 변곡점
+  description: string; // 구간 설명
   start: number;
   end: number;
   summary: string;

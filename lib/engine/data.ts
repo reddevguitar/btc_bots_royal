@@ -39,7 +39,7 @@ export function seeded(seed: number): () => number {
 export function createSyntheticDailyHistory(seed = 42): Array<[number, number]> {
   const rand = seeded(seed);
   const now = Date.now();
-  const start = now - 365 * 4 * DAY_MS;
+  const start = new Date("2013-01-01T00:00:00Z").getTime();
   const points: Array<[number, number]> = [];
   let price = 19000;
 
@@ -56,7 +56,7 @@ export function createSyntheticDailyHistory(seed = 42): Array<[number, number]> 
 
 export async function fetchDailyYears(): Promise<Array<[number, number]>> {
   const end = Date.now();
-  const start = end - 365 * 4 * DAY_MS;
+  const start = new Date("2013-01-01T00:00:00Z").getTime();
   const rangeUrl = `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${Math.floor(start / 1000)}&to=${Math.floor(end / 1000)}`;
   const maxUrl = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=max&interval=daily";
 

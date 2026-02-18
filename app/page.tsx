@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type Stage = {
   id: string;
   type: string;
+  title: string;
+  period: string;
+  turningPoint: string;
+  description: string;
   start: number;
   end: number;
   summary: string;
@@ -72,12 +76,17 @@ export default function Page() {
 
   const pollingRef = useRef<number | null>(null);
 
-  async function fetchSnapshot() {
-    const res = await fetch("/api/runtime", { cache: "no-store" });
-    const data = (await res.json()) as Snapshot;
-    setSnapshot(data);
-    setStageId((prev) => prev || data.selectedStageId);
-    setSpeed((prev) => prev || data.speed);
+  async function fetchSnapshot(): Promise<Snapshot | null> {
+    try {
+      const res = await fetch("/api/runtime", { cache: "no-store" });
+      const data = (await res.json()) as Snapshot;
+      setSnapshot(data);
+      setStageId((prev) => prev || data.selectedStageId);
+      setSpeed((prev) => prev || data.speed);
+      return data;
+    } catch {
+      return null;
+    }
   }
 
   async function sendAction(action: string, payload?: Record<string, unknown>) {
@@ -98,19 +107,26 @@ export default function Page() {
   }
 
   useEffect(() => {
-    void fetchSnapshot();
-    pollingRef.current = window.setInterval(() => {
-      void fetchSnapshot();
-    }, 1200);
+    let active = true;
+
+    const poll = async () => {
+      const data = await fetchSnapshot();
+      if (!active) return;
+      const nextDelay = data?.status === "running" ? 300 : 1800;
+      pollingRef.current = window.setTimeout(poll, nextDelay);
+    };
+
+    void poll();
 
     return () => {
-      if (pollingRef.current) window.clearInterval(pollingRef.current);
+      active = false;
+      if (pollingRef.current !== null) window.clearTimeout(pollingRef.current);
     };
   }, []);
 
   const leader = snapshot?.leaderboard?.[0];
   const totalTrades = snapshot?.leaderboard?.reduce((s, b) => s + b.trades, 0) ?? 0;
-  const selectedStageType = snapshot?.stages.find((s) => s.id === snapshot?.selectedStageId)?.type || "-";
+  const selectedStageType = snapshot?.stages.find((s) => s.id === snapshot?.selectedStageId)?.title || "-";
   const sortedBotStates = useMemo(() => {
     if (!snapshot) return [];
     return snapshot.botStates.slice().sort((a, b) => b.ret - a.ret);
@@ -131,12 +147,12 @@ export default function Page() {
           <button disabled={busy} onClick={() => sendAction("reset")}>리셋</button>
         </div>
 
-        <h2 style={{ marginTop: 12 }}>Options</h2>
+        <h2 style={{ marginTop: 12 }}>옵션 변경</h2>
         <div className="btns">
-          <label htmlFor="stage">스테이지</label>
+          <label htmlFor="stage">비트코인 역사</label>
           <select id="stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
             {(snapshot?.stages || []).map((s) => (
-              <option key={s.id} value={s.id}>{s.type}</option>
+              <option key={s.id} value={s.id}>{s.title}</option>
             ))}
           </select>
         </div>
@@ -150,15 +166,32 @@ export default function Page() {
 
         <div className="btns">
           <button disabled={busy} onClick={() => sendAction("options", { stageId, speed })}>옵션 적용</button>
-          <button disabled={busy} onClick={() => sendAction("regenerate")}>스테이지 재생성</button>
+          <button disabled={busy} onClick={() => sendAction("regenerate")}>역사 구간 다시 로드</button>
         </div>
 
-        <h2 style={{ marginTop: 12 }}>Bots ({snapshot?.botsCatalog.length || 0})</h2>
+        <h2 style={{ marginTop: 12 }}>비트코인 역사 10구간</h2>
+        <div className="list" style={{ maxHeight: 280, overflow: "auto" }}>
+          {(snapshot?.stages || []).map((s) => (
+            <div
+              key={s.id}
+              className={`card stage-card ${stageId === s.id ? "active" : ""}`}
+              onClick={() => setStageId(s.id)}
+            >
+              <div className="title">{s.title}</div>
+              <div className="sub">{s.period}</div>
+              <div className="sub" style={{ marginTop: 4 }}>변곡점: {s.turningPoint}</div>
+              <div className="sub" style={{ marginTop: 4 }}>{s.description}</div>
+            </div>
+          ))}
+        </div>
+
+        <h2 style={{ marginTop: 12 }}>봇 20개 역할 ({snapshot?.botsCatalog.length || 0})</h2>
         <div className="list bot-list">
           {(snapshot?.botsCatalog || []).map((b) => (
             <div key={b.id} className="card">
               <div className="title">{b.name}</div>
-              <div className="sub">{b.desc} · {b.inspiration}</div>
+              <div className="sub">{b.desc}</div>
+              <div className="sub" style={{ marginTop: 4 }}>스타일: {b.inspiration}</div>
             </div>
           ))}
         </div>

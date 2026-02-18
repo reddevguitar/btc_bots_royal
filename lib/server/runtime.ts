@@ -8,6 +8,8 @@ import type { RunResult } from "@/lib/engine/simulator";
 import type { Competitor, LeaderRow, Stage, StagePoint } from "@/lib/engine/types";
 
 const GAME_DURATION_MS = 10 * 60 * 1000;
+const TICK_INTERVAL_MS = 60;
+const PERSIST_INTERVAL_MS = 1000;
 const STORE_DIR = path.join(process.cwd(), ".runtime");
 const STORE_FILE = path.join(STORE_DIR, "runtime-state.json");
 
@@ -62,6 +64,17 @@ type RuntimeSnapshot = {
   runResult: RunResult | null;
 };
 
+function normalizeStages(stages: Stage[]): Stage[] {
+  return (stages || []).map((s, i) => ({
+    ...s,
+    type: s.type || "비트코인 역사",
+    title: s.title || `비트코인 역사 ${i + 1}`,
+    period: s.period || s.summary || "",
+    turningPoint: s.turningPoint || "주요 변곡점",
+    description: s.description || "역사적 이벤트 구간"
+  }));
+}
+
 let runtime: RuntimeData = {
   initialized: false,
   status: "idle",
@@ -80,6 +93,7 @@ let runtime: RuntimeData = {
   runResult: null,
   timer: null
 };
+let lastPersistAt = 0;
 
 function stopTimer() {
   if (runtime.timer) {
@@ -99,6 +113,13 @@ function persist() {
   };
   fs.mkdirSync(STORE_DIR, { recursive: true });
   fs.writeFileSync(STORE_FILE, JSON.stringify(serializable));
+  lastPersistAt = Date.now();
+}
+
+function persistMaybe(force = false) {
+  if (force || Date.now() - lastPersistAt >= PERSIST_INTERVAL_MS) {
+    persist();
+  }
 }
 
 function rehydrateCompetitors(plain: PersistedCompetitor[]): Competitor[] {
@@ -122,6 +143,7 @@ function tryLoadPersisted() {
     runtime = {
       ...runtime,
       ...raw,
+      stages: normalizeStages(raw.stages || []),
       competitors: rehydrateCompetitors(raw.competitors || []),
       timer: null
     };
@@ -149,7 +171,7 @@ function finalizeRun() {
   runtime.runResult = buildRunResult(`run_${Date.now()}`, runtime.selectedStageId, runtime.speed, lb);
   runtime.message = lb[0] ? `종료. 승자: ${lb[0].name} (${lb[0].ret.toFixed(2)}%)` : "종료";
   stopTimer();
-  persist();
+  persistMaybe(true);
 }
 
 function tick() {
@@ -174,23 +196,26 @@ function tick() {
     return;
   }
 
-  persist();
+  persistMaybe();
 }
 
 function ensureTimer() {
   if (runtime.timer) return;
-  runtime.timer = setInterval(tick, 250);
+  runtime.timer = setInterval(tick, TICK_INTERVAL_MS);
 }
 
 async function ensureData() {
-  if (runtime.initialized && runtime.stages.length > 0) return;
+  const firstTs = runtime.daily[0]?.[0] || 0;
+  const hasLongHistory = firstTs > 0 && firstTs <= new Date("2014-01-01T00:00:00Z").getTime();
+  const hasHistoryStages = runtime.stages.length === 10 && runtime.stages.every((s) => Boolean(s.title) && Boolean(s.turningPoint));
+  if (runtime.initialized && hasLongHistory && hasHistoryStages) return;
 
   runtime.daily = await fetchDailyYears();
   runtime.stages = pickStages(runtime.daily);
   runtime.selectedStageId = runtime.stages[0]?.id || "";
   runtime.initialized = true;
   runtime.message = `준비 완료. 스테이지 ${runtime.stages.length}개 / 봇 ${bots.length}개`;
-  persist();
+  persistMaybe(true);
 }
 
 export async function initRuntime() {
@@ -200,7 +225,7 @@ export async function initRuntime() {
     if (runtime.status === "running") {
       runtime.status = "paused";
       runtime.message = "서버 재시작으로 일시정지됨. 재개를 눌러 계속하세요.";
-      persist();
+      persistMaybe(true);
     }
   }
 }
@@ -219,7 +244,7 @@ export async function startRun(params?: { stageId?: string; speed?: number }) {
   const stage = getSelectedStage();
   if (!stage) {
     runtime.message = "선택된 스테이지가 없습니다.";
-    persist();
+    persistMaybe(true);
     return;
   }
 
@@ -234,7 +259,7 @@ export async function startRun(params?: { stageId?: string; speed?: number }) {
   runtime.status = "running";
   runtime.message = `진행 중: ${stage.type} / ${runtime.speed}x`;
   ensureTimer();
-  persist();
+  persistMaybe(true);
 }
 
 export async function pauseRun() {
@@ -244,7 +269,7 @@ export async function pauseRun() {
   runtime.pausedAt = Date.now();
   runtime.message = "일시정지";
   stopTimer();
-  persist();
+  persistMaybe(true);
 }
 
 export async function resumeRun() {
@@ -255,7 +280,7 @@ export async function resumeRun() {
   runtime.status = "running";
   runtime.message = `진행 중 / ${runtime.speed}x`;
   ensureTimer();
-  persist();
+  persistMaybe(true);
 }
 
 export async function stopRun() {
@@ -263,7 +288,7 @@ export async function stopRun() {
   stopTimer();
   runtime.status = "idle";
   runtime.message = "중지됨";
-  persist();
+  persistMaybe(true);
 }
 
 export async function resetRun() {
@@ -278,7 +303,7 @@ export async function resetRun() {
   runtime.tradeLogs = [];
   runtime.runResult = null;
   runtime.message = "리셋 완료";
-  persist();
+  persistMaybe(true);
 }
 
 export async function updateOptions(params: { stageId?: string; speed?: number }) {
@@ -287,7 +312,7 @@ export async function updateOptions(params: { stageId?: string; speed?: number }
   if (params.stageId) runtime.selectedStageId = params.stageId;
   if (params.speed) runtime.speed = params.speed;
   runtime.message = "옵션 변경됨";
-  persist();
+  persistMaybe(true);
 }
 
 export async function regenerateStages() {
@@ -295,7 +320,7 @@ export async function regenerateStages() {
   runtime.stages = pickStages(runtime.daily);
   runtime.selectedStageId = runtime.stages[0]?.id || "";
   runtime.message = `스테이지 갱신 완료. ${runtime.stages.length}개`;
-  persist();
+  persistMaybe(true);
 }
 
 export async function getSnapshot(): Promise<RuntimeSnapshot> {
